@@ -48,7 +48,7 @@ class CenterNet:
             self._create_summary()
         self._init_session()
 
-    def _define_inputs(self):
+    def _define_inputs(self): # 1 입력 관련 초기화
         shape = [self.batch_size]
         shape.extend(self.data_shape)
         mean = tf.convert_to_tensor([0.485, 0.456, 0.406], dtype=tf.float32)
@@ -59,14 +59,14 @@ class CenterNet:
         else:
             mean = tf.reshape(mean, [1, 3, 1, 1])
             std = tf.reshape(std, [1, 3, 1, 1])
-        if self.mode == 'train':
+        if self.mode == 'train': # 왜 학습 관련 input data는 placeholder를 안하는가??
             self.images, self.ground_truth = self.train_iterator.get_next()
             self.images.set_shape(shape)
             self.images = (self.images / 255. - mean) / std
-        else:
-            self.images = tf.placeholder(tf.float32, shape, name='images')
-            self.images = (self.images / 255. - mean) / std
-            self.ground_truth = tf.placeholder(tf.float32, [self.batch_size, None, 5], name='labels')
+        else: # 학습 외의 placeholder
+            self.images = tf.placeholder(tf.float32, shape, name='images') # input data
+            self.images = (self.images / 255. - mean) / std # mean이 의미하는 것은 ? normalization을 하는 듯 해보인다.
+            self.ground_truth = tf.placeholder(tf.float32, [self.batch_size, None, 5], name='labels') # 정답
         self.lr = tf.placeholder(dtype=tf.float32, shape=[], name='lr')
 
     def _build_graph(self):
@@ -89,58 +89,58 @@ class CenterNet:
                 kernel_size=3,
                 strides=2,
             )
-            dla_stage3 = self._dla_generator(conv, 64, 1, self._basic_block)
-            dla_stage3 = self._max_pooling(dla_stage3, 2, 2)
+            dla_stage3 = self._dla_generator(conv, 64, 1, self._basic_block) # 255 X 255 / 64
+            dla_stage3 = self._max_pooling(dla_stage3, 2, 2) # 128 X 128 / 64
 
-            dla_stage4 = self._dla_generator(dla_stage3, 128, 2, self._basic_block)
-            residual = self._conv_bn_activation(dla_stage3, 128, 1, 1)
-            residual = self._avg_pooling(residual, 2, 2)
-            dla_stage4 = self._max_pooling(dla_stage4, 2, 2)
-            dla_stage4 = dla_stage4 + residual
+            dla_stage4 = self._dla_generator(dla_stage3, 128, 2, self._basic_block) # 128 X 128 / 128
+            residual = self._conv_bn_activation(dla_stage3, 128, 1, 1) # 128 X 128 / 128 ==> 1X1 conv
+            residual = self._avg_pooling(residual, 2, 2) # 64 X 64 / 128 ( avg_pooling )
+            dla_stage4 = self._max_pooling(dla_stage4, 2, 2) # 64 X 64 / 128
+            dla_stage4 = dla_stage4 + residual # 64 X 64 / 256 ( resnet ) 해당 부분이 concat 인가 혹은 matadd인가
 
-            dla_stage5 = self._dla_generator(dla_stage4, 256, 2, self._basic_block)
-            residual = self._conv_bn_activation(dla_stage4, 256, 1, 1)
-            residual = self._avg_pooling(residual, 2, 2)
-            dla_stage5 = self._max_pooling(dla_stage5, 2, 2)
-            dla_stage5 = dla_stage5 + residual
+            dla_stage5 = self._dla_generator(dla_stage4, 256, 2, self._basic_block) # 64 X 64 / 256
+            residual = self._conv_bn_activation(dla_stage4, 256, 1, 1) # 64X64 / 256 
+            residual = self._avg_pooling(residual, 2, 2) # 32 X 32 / 256
+            dla_stage5 = self._max_pooling(dla_stage5, 2, 2) # 32 X 32 / 256
+            dla_stage5 = dla_stage5 + residual # 32 X 32 / 512 
 
-            dla_stage6 = self._dla_generator(dla_stage5, 512, 1, self._basic_block)
-            residual = self._conv_bn_activation(dla_stage5, 512, 1, 1)
-            residual = self._avg_pooling(residual, 2, 2)
-            dla_stage6 = self._max_pooling(dla_stage6, 2, 2)
-            dla_stage6 = dla_stage6 + residual
-        with tf.variable_scope('upsampling'):
-            dla_stage6 = self._conv_bn_activation(dla_stage6, 256, 1, 1)
-            dla_stage6_5 = self._dconv_bn_activation(dla_stage6, 256, 4, 2)
-            dla_stage6_4 = self._dconv_bn_activation(dla_stage6_5, 256, 4, 2)
-            dla_stage6_3 = self._dconv_bn_activation(dla_stage6_4, 256, 4, 2)
+            dla_stage6 = self._dla_generator(dla_stage5, 512, 1, self._basic_block) # 32 X 32 / 512
+            residual = self._conv_bn_activation(dla_stage5, 512, 1, 1) # 32 X 32 / 512
+            residual = self._avg_pooling(residual, 2, 2) # 16 X 16 / 512
+            dla_stage6 = self._max_pooling(dla_stage6, 2, 2) # 16 X 16 / 512
+            dla_stage6 = dla_stage6 + residual # 16 X 16 / 1024 # end downsampling
+        with tf.variable_scope('upsampling'): # upsampling
+            dla_stage6 = self._conv_bn_activation(dla_stage6, 256, 1, 1)  #filter = 256 kernel size = 1 stride = 1 ==> 16X16/256
+            dla_stage6_5 = self._dconv_bn_activation(dla_stage6, 256, 4, 2) # 32X32/256
+            dla_stage6_4 = self._dconv_bn_activation(dla_stage6_5, 256, 4, 2) # 64X64/256
+            dla_stage6_3 = self._dconv_bn_activation(dla_stage6_4, 256, 4, 2) # 128X128/256 ( 1 )
 
-            dla_stage5 = self._conv_bn_activation(dla_stage5, 256, 1, 1)
-            dla_stage5_4 = self._conv_bn_activation(dla_stage5+dla_stage6_5, 256, 3, 1)
-            dla_stage5_4 = self._dconv_bn_activation(dla_stage5_4, 256, 4, 2)
-            dla_stage5_3 = self._dconv_bn_activation(dla_stage5_4, 256, 4, 2)
+            dla_stage5 = self._conv_bn_activation(dla_stage5, 256, 1, 1) # 64 X 64 / 256
+            dla_stage5_4 = self._conv_bn_activation(dla_stage5+dla_stage6_5, 256, 3, 1) # (64 X 64 / 256) + (64 X 64 / 256) = (64X64/256) ( resnet과 같이 연결 후 conv)
+            dla_stage5_4 = self._dconv_bn_activation(dla_stage5_4, 256, 4, 2) # 128X128/256
+            dla_stage5_3 = self._dconv_bn_activation(dla_stage5_4, 256, 4, 2) # 256X256/256 ( 2 ) 
 
-            dla_stage4 = self._conv_bn_activation(dla_stage4, 256, 1, 1)
-            dla_stage4_3 = self._conv_bn_activation(dla_stage4+dla_stage5_4+dla_stage6_4, 256, 3, 1)
-            dla_stage4_3 = self._dconv_bn_activation(dla_stage4_3, 256, 4, 2)
+            dla_stage4 = self._conv_bn_activation(dla_stage4, 256, 1, 1) # 64 X 64 / 256
+            dla_stage4_3 = self._conv_bn_activation(dla_stage4+dla_stage5_4+dla_stage6_4, 256, 3, 1) # (64 X 64 / 256) + (64 X 64 / 256) + (64 X 64 / 256) => (64 X 64 / 256)
+            dla_stage4_3 = self._dconv_bn_activation(dla_stage4_3, 256, 4, 2) # 128 X 128 / 256 ( 3 )
 
-            features = self._conv_bn_activation(dla_stage6_3+dla_stage5_3+dla_stage4_3, 256, 3, 1)
-            features = self._conv_bn_activation(features, 256, 1, 1)
+            features = self._conv_bn_activation(dla_stage6_3+dla_stage5_3+dla_stage4_3, 256, 3, 1) # 128 X 128 / 256 ( 1 + 2 + 3 )
+            features = self._conv_bn_activation(features, 256, 1, 1) # 1X1 conv (maxpooling과 유사한 효과) ==> 128X128 / 256 
             stride = 4.0
 
         with tf.variable_scope('center_detector'):
-            keypoints = self._conv_bn_activation(features, self.num_classes, 3, 1, None)
-            offset = self._conv_bn_activation(features, 2, 3, 1, None)
-            size = self._conv_bn_activation(features, 2, 3, 1, None)
+            keypoints = self._conv_bn_activation(features, self.num_classes, 3, 1, None) # 128 X 128 / classes
+            offset = self._conv_bn_activation(features, 2, 3, 1, None) # 128 X 128 / 2 offset ?
+            size = self._conv_bn_activation(features, 2, 3, 1, None) # 128 X 128 / 2 size ?
             if self.data_format == 'channels_first':
-                keypoints = tf.transpose(keypoints, [0, 2, 3, 1])
-                offset = tf.transpose(offset, [0, 2, 3, 1])
-                size = tf.transpose(size, [0, 2, 3, 1])
-            pshape = [tf.shape(offset)[1], tf.shape(offset)[2]]
+                keypoints = tf.transpose(keypoints, [0, 2, 3, 1]) # 중심점
+                offset = tf.transpose(offset, [0, 2, 3, 1]) # corner
+                size = tf.transpose(size, [0, 2, 3, 1]) # ??
+            pshape = [tf.shape(offset)[1], tf.shape(offset)[2]] # w & h
 
             h = tf.range(0., tf.cast(pshape[0], tf.float32), dtype=tf.float32)
             w = tf.range(0., tf.cast(pshape[1], tf.float32), dtype=tf.float32)
-            [meshgrid_x, meshgrid_y] = tf.meshgrid(w, h)
+            [meshgrid_x, meshgrid_y] = tf.meshgrid(w, h) # NXN으로 전환 
             if self.mode == 'train':
                 total_loss = []
                 for i in range(self.batch_size):
@@ -185,26 +185,26 @@ class CenterNet:
                 self.detection_pred = [select_scores, select_bbox, select_class_id]
 
     def _compute_one_image_loss(self, keypoints, offset, size, ground_truth, meshgrid_y, meshgrid_x,
-                                stride, pshape):
+                                stride, pshape): # (keypoints[i, ...], offset[i, ...], size[i, ...], self.ground_truth[i, ...], meshgrid_y, meshgrid_x, stride, pshape)
         slice_index = tf.argmin(ground_truth, axis=0)[0]
         ground_truth = tf.gather(ground_truth, tf.range(0, slice_index, dtype=tf.int64))
-        ngbbox_y = ground_truth[..., 0] / stride
-        ngbbox_x = ground_truth[..., 1] / stride
-        ngbbox_h = ground_truth[..., 2] / stride
-        ngbbox_w = ground_truth[..., 3] / stride
+        ngbbox_y = ground_truth[..., 0] / stride # point y(original) / 4
+        ngbbox_x = ground_truth[..., 1] / stride # point x(original) / 4
+        ngbbox_h = ground_truth[..., 2] / stride # height(original) / 4 
+        ngbbox_w = ground_truth[..., 3] / stride # width(original) / 4
         class_id = tf.cast(ground_truth[..., 4], dtype=tf.int32)
-        ngbbox_yx = ground_truth[..., 0:2] / stride
-        ngbbox_yx_round = tf.floor(ngbbox_yx)
-        offset_gt = ngbbox_yx - ngbbox_yx_round
-        size_gt = ground_truth[..., 2:4] / stride
-        ngbbox_yx_round_int = tf.cast(ngbbox_yx_round, tf.int64)
+        ngbbox_yx = ground_truth[..., 0:2] / stride # y,x값 두개의 정보를 가지는 변수
+        ngbbox_yx_round = tf.floor(ngbbox_yx) # 해당값보다 크지 않는 정수 반환 1.555 => 1.
+        offset_gt = ngbbox_yx - ngbbox_yx_round # 소수값만 남음
+        size_gt = ground_truth[..., 2:4] / stride #hegiht, weight값
+        ngbbox_yx_round_int = tf.cast(ngbbox_yx_round, tf.int64) # int값으로 전환 
         keypoints_loss = self._keypoints_loss(keypoints, ngbbox_yx_round_int, ngbbox_y, ngbbox_x, ngbbox_h,
                                               ngbbox_w, class_id, meshgrid_y, meshgrid_x, pshape)
 
-        offset = tf.gather_nd(offset, ngbbox_yx_round_int)
-        size = tf.gather_nd(size, ngbbox_yx_round_int)
-        offset_loss = tf.reduce_mean(tf.abs(offset_gt - offset))
-        size_loss = tf.reduce_mean(tf.abs(size_gt - size))
+        offset = tf.gather_nd(offset, ngbbox_yx_round_int) # 실측값과 예측값과 동일한 위치의 값을 추출
+        size = tf.gather_nd(size, ngbbox_yx_round_int) # 위와 동일
+        offset_loss = tf.reduce_mean(tf.abs(offset_gt - offset)) # 실측값과 예측값의 차이의 절대값
+        size_loss = tf.reduce_mean(tf.abs(size_gt - size)) # 박스 사이즈 loss 확인
         total_loss = keypoints_loss + 0.1*size_loss + offset_loss
         return total_loss
 
@@ -251,7 +251,7 @@ class CenterNet:
         return keypoints_loss
 
     # from cornernet
-    def _gaussian_radius(self, height, width, min_overlap=0.7):
+    def _gaussian_radius(self, height, width, min_overlap=0.7): # calcul keypoint's tl,br min value in ground-truth
         a1 = 1.
         b1 = (height + width)
         c1 = width * height * (1. - min_overlap) / (1. + min_overlap)
@@ -348,8 +348,8 @@ class CenterNet:
         else:
             return bn
 
-    def _dconv_bn_activation(self, bottom, filters, kernel_size, strides, activation=tf.nn.relu):
-        conv = tf.layers.conv2d_transpose(
+    def _dconv_bn_activation(self, bottom, filters, kernel_size, strides, activation=tf.nn.relu): # upsample conv layer
+        conv = tf.layers.conv2d_transpose( 
             inputs=bottom,
             filters=filters,
             kernel_size=kernel_size,
@@ -377,7 +377,7 @@ class CenterNet:
             bn = activation(bn)
         return bn
 
-    def _basic_block(self, bottom, filters):
+    def _basic_block(self, bottom, filters): 
         conv = self._conv_bn_activation(bottom, filters, 3, 1)
         conv = self._conv_bn_activation(conv, filters, 3, 1)
         axis = 3 if self.data_format == 'channels_last' else 1
@@ -389,12 +389,12 @@ class CenterNet:
         )
         return conv + shutcut
 
-    def _dla_generator(self, bottom, filters, levels, stack_block_fn):
+    def _dla_generator(self, bottom, filters, levels, stack_block_fn): # (conv, 64, 1, self._basic_block) 
         if levels == 1:
-            block1 = stack_block_fn(bottom, filters)
+            block1 = stack_block_fn(bottom, filters) # 380 = _basic_block
             block2 = stack_block_fn(block1, filters)
-            aggregation = block1 + block2
-            aggregation = self._conv_bn_activation(aggregation, filters, 3, 1)
+            aggregation = block1 + block2 # 해당 위치에서 filter은 4배로 증가한다.
+            aggregation = self._conv_bn_activation(aggregation, filters, 3, 1) # 해당 위치에서 다시 filter를 input filter크기로 재조정
         else:
             block1 = self._dla_generator(bottom, filters, levels-1, stack_block_fn)
             block2 = self._dla_generator(block1, filters, levels-1, stack_block_fn)
